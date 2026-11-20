@@ -5,6 +5,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { shared } from './materials.js';
 
 export const BG = new THREE.Color(0x050609);
@@ -32,6 +33,12 @@ export function createStage(canvas, quality) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0.16;
+  // HDRI real de estudio (Poly Haven, CC0) codificado RGBE en PNG: reflejos físicamente plausibles
+  loadRGBEEnv(renderer, pmrem, 'textures/studio_rgbe.png').then((env) => {
+    scene.environment = env;
+    scene.environmentIntensity = 0.2;
+    scene.environmentRotation = new THREE.Euler(0, Math.PI * 0.66, 0);
+  }).catch(() => { /* se mantiene el entorno sintético */ });
 
   const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.05, 80);
   camera.position.set(4.6, 2.3, 5.6);
@@ -114,7 +121,16 @@ export function createStage(canvas, quality) {
   });
   const composer = new EffectComposer(renderer, rt);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.6, 0.5, 1.4);
+  // oclusión ambiental en espacio de pantalla: asienta al dragón y oscurece pliegues y juntas
+  let gtao = null;
+  if (quality === 'alta') {
+    gtao = new GTAOPass(scene, camera, innerWidth, innerHeight);
+    gtao.blendIntensity = 0.9;
+    gtao.updateGtaoMaterial({ radius: 0.32, distanceExponent: 1.4, thickness: 1.2, scale: 1.0, samples: 12 });
+    gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 12 });
+    composer.addPass(gtao);
+  }
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth / 2, innerHeight / 2), 0.6, 0.5, 2.0);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
 
@@ -137,5 +153,26 @@ export function createStage(canvas, quality) {
     });
   }
 
-  return { renderer, scene, camera, composer, bloom, key, floor, motes, updateLightUniforms, resize };
+  return { renderer, scene, camera, composer, bloom, gtao, key, floor, motes, updateLightUniforms, resize };
+}
+
+async function loadRGBEEnv(renderer, pmrem, url) {
+  const blob = await (await fetch(url)).blob();
+  const bmp = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none', imageOrientation: 'flipY' });
+  const tex = new THREE.Texture(bmp);
+  Object.assign(tex, { colorSpace: THREE.NoColorSpace, premultiplyAlpha: false, flipY: false, generateMipmaps: false,
+    minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, needsUpdate: true });
+  const rt = new THREE.WebGLRenderTarget(bmp.width, bmp.height, { type: THREE.HalfFloatType });
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { t: { value: tex } }, depthTest: false, depthWrite: false,
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4( position.xy, 0.0, 1.0 ); }',
+    fragmentShader: 'uniform sampler2D t; varying vec2 vUv; void main() { vec4 c = texture2D( t, vUv ); float e = c.a * 255.0 - 128.0; gl_FragColor = vec4( ( c.rgb * 255.0 + 0.5 ) / 256.0 * exp2( e ), 1.0 ); }',
+  });
+  const sc = new THREE.Scene(); sc.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+  const prev = renderer.getRenderTarget();
+  renderer.setRenderTarget(rt); renderer.render(sc, new THREE.Camera()); renderer.setRenderTarget(prev);
+  rt.texture.mapping = THREE.EquirectangularReflectionMapping;
+  const env = pmrem.fromEquirectangular(rt.texture).texture;
+  rt.dispose(); tex.dispose(); mat.dispose();
+  return env;
 }

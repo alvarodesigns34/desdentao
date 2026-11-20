@@ -189,6 +189,21 @@ def eval_points(prims, P, init=10.0):
     return f
 
 
+DETAILS = []        # capa de detalle (detail.py); se rellena desde 01_sculpt.py
+DETAIL_BAND = 0.012
+
+
+def apply_details(f, P):
+    """Suma el desplazamiento de detalle en la banda cercana a la superficie."""
+    if not DETAILS:
+        return f
+    from detail import total_disp
+    band = np.abs(f) < DETAIL_BAND
+    if band.any():
+        f[band] = f[band] - total_disp(DETAILS, P[band]).astype(f.dtype)
+    return f
+
+
 def eval_grid_block(prims, origin, h, shape, init=10.0):
     """Evalúa el campo en un bloque regular usando cajas envolventes."""
     f = np.full(shape, init, dtype=np.float32)
@@ -223,6 +238,13 @@ def eval_grid_block(prims, origin, h, shape, init=10.0):
                 sub[...] = smin(sub, d, pr.k)
             else:
                 sub[...] = smax(sub, -d, pr.k)
+    if DETAILS:
+        band = np.abs(f) < DETAIL_BAND
+        if band.any():
+            idx = np.nonzero(band)
+            P = np.stack([gx[idx[0]], gy[idx[1]], gz[idx[2]]], -1)
+            from detail import total_disp
+            f[band] -= total_disp(DETAILS, P).astype(np.float32)
     return f
 
 

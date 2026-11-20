@@ -180,7 +180,7 @@ export class Rig {
       low.matrixWorld.decompose(_v2, pq, _v3);
       const mq = new THREE.Quaternion();
       this.model.matrixWorld.decompose(_v2, mq, _v3);
-      const want = mq.clone().multiply(leg.restEndQ);
+      const want = mq.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), leg.footYaw || 0)).multiply(leg.restEndQ);
       end.quaternion.copy(pq.invert().multiply(want));
       end.updateMatrixWorld(true);
     }
@@ -247,4 +247,14 @@ export function spring(s, target, omega, dt) {
   s.v = (s.v + hoo * (target - s.x)) * det;
   s.x = x;
   return x;
+}
+
+// Muelle con razón de amortiguación configurable (zeta < 1: rebote orgánico)
+export function springZ(s, target, omega, zeta, dt) {
+  const n = dt > 1 / 60 ? 2 : 1, h = dt / n;
+  for (let i = 0; i < n; i++) {
+    s.v += (omega * omega * (target - s.x) - 2 * zeta * omega * s.v) * h;
+    s.x += s.v * h;
+  }
+  return s.x;
 }

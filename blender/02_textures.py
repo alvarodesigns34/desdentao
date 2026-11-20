@@ -12,7 +12,7 @@ Genera en assets/textures/:
   bodymap.png                   en espacio 'bodyuv' (u: longitud del cuerpo, v: |ángulo|/pi)
                                 R: vetas de brillo (brasa)  G: relieve de placas ventrales  B: máscara ventral
 """
-import os
+import os, sys
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -222,7 +222,71 @@ def make_bodymap(W=4096, Hh=512):
     print("bodymap OK")
 
 
+def _cells(N, cols, rows, jit, seed, hexo=True):
+    r = np.random.default_rng(seed)
+    cx = np.zeros((rows, cols)); cy = np.zeros((rows, cols))
+    for i in range(rows):
+        for j in range(cols):
+            cx[i, j] = j + 0.5 + (0.5 if (hexo and i % 2) else 0) + (r.random() - 0.5) * jit
+            cy[i, j] = i + 0.5 + (r.random() - 0.5) * jit
+    return cx, cy, r.random((rows, cols)), 0.8 + 0.4 * r.random((rows, cols))
+
+
+def _voronoi(N, cols, rows, cx, cy, size, aniso=(1.0, 1.0)):
+    yy, xx = np.mgrid[0:N, 0:N].astype(np.float32)
+    xx = xx / N * cols; yy = yy / N * rows
+    ri = np.floor(yy).astype(int); ci = np.floor(xx).astype(int)
+    F1 = np.full((N, N), 9.0, np.float32); F2 = np.full((N, N), 9.0, np.float32)
+    idc = np.zeros((N, N), int); DX = np.zeros((N, N), np.float32); DY = np.zeros((N, N), np.float32)
+    for dr in range(-2, 3):
+        for dc in range(-2, 3):
+            r_ = ri + dr; c_ = ci + dc
+            rr = r_ % rows; cc = c_ % cols
+            dx = (xx - (cx[rr, cc] + (c_ - cc))) * aniso[0]
+            dy = (yy - (cy[rr, cc] + (r_ - rr))) * aniso[1]
+            d = np.sqrt(dx * dx + dy * dy) / size[rr, cc]
+            cl = d < F1
+            F2 = np.where(cl, F1, np.minimum(F2, d)); idc = np.where(cl, rr * cols + cc, idc)
+            DX = np.where(cl, dx, DX); DY = np.where(cl, dy, DY); F1 = np.where(cl, d, F1)
+    return F1, F2, idc, DX, DY
+
+
+def _save_set(name, h, rnd, cav):
+    h = (h - h.min()) / (h.max() - h.min())
+    save16(h, f"{name}_height.png")
+    save8(np.stack([h, rnd, cav], -1), f"{name}_data.png")
+    print(name, "OK")
+
+
+def make_granular(N=2048, cells=56):
+    """Escama granular (tubérculos redondeados, sin solape): cabeza, articulaciones, patas."""
+    cx, cy, rnd, size = _cells(N, cells, cells, 0.55, 31)
+    F1, F2, idc, DX, DY = _voronoi(N, cells, cells, cx, cy, size)
+    edge = F2 - F1
+    dome = np.sqrt(np.clip(1 - (F1 / 0.62) ** 2, 0, 1))
+    r = rnd.ravel()[idc]
+    h = smoothstep(0.0, 0.16, edge) * (0.35 + 0.65 * dome) * (0.75 + 0.25 * r)
+    h += 0.04 * (tile_noise(N, 128, 2, seed=8) - 0.5)
+    _save_set("granular", h, r, 1 - smoothstep(0.0, 0.07, edge))
+
+
+def make_keeled(N=2048, cols=26, rows=40):
+    """Escama aquillada imbricada (lomo, cuello, cola). Eje X = a lo largo del cuerpo (hacia la cola)."""
+    cx, cy, rnd, size = _cells(N, cols, rows, 0.25, 47)
+    F1, F2, idc, DX, DY = _voronoi(N, cols, rows, cx, cy, size, aniso=(0.62, 1.0))
+    edge = F2 - F1
+    r = rnd.ravel()[idc]
+    # imbricación: cada escama sube hacia su borde posterior (+x) y cae bajo la siguiente
+    slope = np.clip(0.5 + 0.9 * DX, 0, 1.2)
+    keel = np.exp(-(DY / 0.06) ** 2) * np.clip(0.3 + DX * 1.2, 0, 1)   # quilla central
+    h = smoothstep(0.0, 0.12, edge) * (0.45 * slope + 0.35 * keel + 0.2) * (0.8 + 0.2 * r)
+    h += 0.03 * (tile_noise(N, 128, 2, seed=9) - 0.5)
+    _save_set("keeled", h, r, 1 - smoothstep(0.0, 0.06, edge))
+
+
 if __name__ == "__main__":
+    if "--nuevas" in sys.argv:
+        make_granular(); make_keeled(); sys.exit(0)
     make_scales()
     make_iris()
     make_wing()

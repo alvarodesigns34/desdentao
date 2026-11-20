@@ -80,7 +80,9 @@ Requisitos: Blender 4.5 LTS (probado con 4.5.16), Python 3 con `numpy`, `scikit-
 ```bash
 python3 blender/01_sculpt.py 0.003          # escultura (≈1,7 M vértices, ~90 s)
 python3 blender/02_textures.py              # texturas procedurales
-blender -b -P blender/03_build.py -- --hero-faces 520000 --web-faces 110000
+python3 blender/02_textures.py --nuevas     # escama granular y aquillada
+blender -b -P blender/03_build.py -- --hero-faces 600000 --web-faces 120000   # incluye horneado
+python3 blender/06_web_textures.py          # mapas horneados -> WebP
 blender -b output/vesper.blend -P blender/04_render.py -- --cams Cam_Heroe,Cam_Cabeza --action enfado --frame 60
 bash blender/05_render_all.sh 128           # tanda completa de renders
 ```
@@ -122,6 +124,39 @@ Si cambias las texturas, copia las versiones WebP a `web/public/textures/`
 - **Acciones.** `Reposo` y una acción por emoción (`Emocion_*`). Combinan pose emocional, respiración,
   onda de cola, micro-movimiento de cabeza y parpadeo. Las propiedades `pupil`, `glow`, `snarl`… del rig
   (en **VesperRig > Propiedades personalizadas**) controlan materiales y shape keys.
+
+### Capa de hiperrealismo (v2)
+
+- **Forma.** `blender/lib/detail.py` añade un desplazamiento anatómico sobre el SDF, aplicado solo en una banda junto a la superficie:
+  - irregularidad orgánica multiescala y tubérculos;
+  - osteodermos en hileras alternas sobre lomo, cuello y cola;
+  - placas ventrales con surcos; pliegues irregulares de cuello y garganta;
+  - verticilos y surco muscular lateral de la cola; costillas insinuadas;
+  - pliegues de flexión en codos, muñecas, rodillas y corvejones;
+  - placas craneales, escamas supralabiales y tubérculos de mejilla.
+
+  También se han añadido olécranon, rótula, calcáneo, tendón y deltoides, y se han afinado muñecas y tobillos.
+- **Piel por regiones** (`02_textures.py --nuevas`): escama granular (cabeza, patas, articulaciones), escama aquillada imbricada orientada a lo largo del cuerpo (coordenadas `bodym`) y placas ventrales. El material Cycles añade:
+  - moteado con matices verdoso y bronce, y variación por escama;
+  - puntas pulidas y juntas oscuras;
+  - polvo en las juntas de las zonas bajas;
+  - zonas húmedas (boca, narinas, ojos) con *coat*;
+  - queratina con estrías de crecimiento;
+  - iridiscencia sutil y SSS.
+- **Horneado para tiempo real.** `03_build.py` despliega la malla web (sobre una copia suavizada para lograr islas limpias) y hornea desde el modelo de alta resolución color, rugosidad y normal map (4096 px). `06_web_textures.py` los convierte a WebP. La app los combina con microescama triplanar que solo aparece de cerca.
+- **Iluminación.** HDRI de estudio real de [Poly Haven](https://polyhaven.com/a/studio_small_09) (CC0) para reflejos, tanto en Cycles como en la web (codificado RGBE en PNG). En la web se añade oclusión ambiental GTAO.
+- **Movimiento** (`web/src/physics.js` y `behavior.js`):
+  - cola simulada (Verlet) con inercia, gravedad y colisión con el suelo;
+  - el cuerpo gira hacia su foco de atención y las patas dan pasos reales en pares diagonales, con pisadas clavadas al suelo;
+  - gorgueras y abanico con muelles subamortiguados (rebote orgánico);
+  - microsacadas oculares y párpados que acompañan la mirada vertical;
+  - pupila que reacciona a la cercanía y al interés;
+  - narinas que se abren al inspirar.
+
+**Limitación nueva.** El desplazamiento geométrico real (subdivisión adaptativa de Cycles) agota los 15 GB de
+memoria de este entorno con 600 000 caras, así que la escama fina se renderiza como relieve (*bump*) a partir del
+mismo mapa de altura. El modificador `Microdesplazamiento` queda preparado y desactivado en el `.blend`. Con más
+memoria: actívalo y pon el material en `displacement_method = "BOTH"`.
 
 ### Rig expresivo compartido
 

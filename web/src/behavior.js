@@ -2,7 +2,7 @@
 // movimiento secundario. Produce objetivos de parámetros que el Animator suaviza con
 // muelles críticamente amortiguados (dos velocidades: cabeza rápida / cuerpo lento).
 import * as THREE from 'three';
-import { spring } from './rig.js';
+import { spring, springZ } from './rig.js';
 
 export const MOODS = {
   calma: { label: 'Calma', status: 'Vesper está en calma' },
@@ -91,6 +91,8 @@ export class Behavior {
     this.ikLift = { leg: null, amt: 0 };
     this.headLookOffset = { yaw: 0, pitch: 0 };
     this.onStatus = null;
+    this.bodyYaw = 0; this.relYaw = 0;
+    this._sacc = { next: 0, off: new THREE.Vector3() };
   }
 
   // ------------------------------------------------------------------ API
@@ -322,10 +324,30 @@ export class Behavior {
 
     // --- muelles -------------------------------------------------------
     const out = {}, outSlow = {};
+    // ajustes perceptivos: párpados que acompañan la mirada vertical, pupila según cercanía e interés
+    {
+      const hb = this.rig.get('head');
+      const hp = this.rig.worldPos('head');
+      const inv = hb.matrixWorld.clone().invert();
+      const g = this.gaze.point.clone().applyMatrix4(inv).normalize();
+      const restAx = this.rig.restOf('head');
+      void restAx;
+      // elevación aproximada respecto al plano de la cabeza (eje Y local = hacia el hocico)
+      const elev = Math.asin(THREE.MathUtils.clamp(g.z, -1, 1));
+      target.lid_up += THREE.MathUtils.clamp(-elev, -0.5, 0.5) * 0.35;
+      const camD = this.viewer.distanceTo(hp);
+      target.pupil += (camD < 1.4 ? -0.12 * (1.4 - camD) : 0) + 0.12 * Math.min(1, this.cursor.interest);
+    }
+    // muelles: membranas (gorgueras, abanico) subamortiguadas para un rebote orgánico
     for (const p of this.params) {
       const om = OMEGA(p);
-      out[p] = spring(this.fast[p], target[p], om, dt);
-      outSlow[p] = spring(this.slow[p], target[p], om * 0.55, dt);
+      if (/^frill|^fan/.test(p)) {
+        out[p] = springZ(this.fast[p], target[p], om * 1.2, 0.42, dt);
+        outSlow[p] = springZ(this.slow[p], target[p], om * 0.8, 0.38, dt);
+      } else {
+        out[p] = spring(this.fast[p], target[p], om, dt);
+        outSlow[p] = spring(this.slow[p], target[p], om * 0.55, dt);
+      }
     }
     out.lid_up = out.lid_up + (1.0 - out.lid_up) * bl;
     out.lid_lo = out.lid_lo + (0.92 - out.lid_lo) * bl;
@@ -336,11 +358,19 @@ export class Behavior {
     this.breathPhase += dt * 2 * Math.PI * (purr ? rate * 0.8 : rate);
     const br = 0.5 + 0.5 * Math.sin(this.breathPhase);
     out.breath = depth * br;
+    // las narinas se abren al inspirar
+    const inhale = Math.max(0, Math.cos(this.breathPhase));
+    out.nostril = Math.max(out.nostril, 0.22 * inhale * depth);
     out.throat = Math.max(out.throat, purr ? 0.08 + 0.06 * Math.sin(t * 52) * pl : 0);
     out.glow = out.glow * (0.82 + 0.18 * br) + (purr ? 0.12 * pl * (0.5 + 0.5 * Math.sin(t * 7)) : 0);
     out.chestBreath = br;
     out.blink = bl;
-    return { values: out, slow: outSlow, gaze: this.gaze.point, tail: this._tailMotion(dt, t, st) };
+    if (t >= this._sacc.next) {
+      const dist = this.gaze.point.distanceTo(this.rig.worldPos('head'));
+      this._sacc = { next: t + rnd(0.25, 0.9), off: new THREE.Vector3(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).multiplyScalar(0.012 * dist) };
+    }
+    const eyeGaze = this.gaze.point.clone().add(this._sacc.off);
+    return { values: out, slow: outSlow, gaze: eyeGaze, tail: this._tailMotion(dt, t, st) };
   }
 
   _headToward(target, point, follow) {
@@ -349,7 +379,9 @@ export class Behavior {
     const d = point.clone().sub(base);
     const m = rig.model.matrixWorld.clone().invert();
     d.transformDirection(m);
-    const yaw = Math.atan2(d.x, d.z);
+    const yaw0 = Math.atan2(d.x, d.z);
+    const yaw = Math.atan2(Math.sin(yaw0 - this.bodyYaw), Math.cos(yaw0 - this.bodyYaw));
+    this.relYaw = yaw;
     const horiz = Math.hypot(d.x, d.z);
     const elev = Math.atan2(d.y - 0.45, horiz);
     target.head_yaw += clamp(yaw * follow / 0.98, -1.35, 1.35);

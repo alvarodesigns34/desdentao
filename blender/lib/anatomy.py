@@ -316,19 +316,30 @@ def body_prims():
         P.append(rcone(FS * m, FE * m, 0.15, 0.10, k=0.06, bone=f"upperarm.{S}", tag="arm"))
         P.append(ell_along(FS * m, FE * m, ((FS * 0.55 + FE * 0.45) + V(0, 0.04, 0)) * m, 0.10, 0.17, 0.10,
                            k=0.05, bone=f"upperarm.{S}", tag="triceps"))
-        P.append(rcone(FE * m, FW * m, 0.094, 0.062, k=0.04, bone=f"forearm.{S}", tag="forearm"))
-        P.append(ell_along(FE * m, FW * m, (FE * 0.7 + FW * 0.3) * m, 0.088, 0.15, 0.085,
+        P.append(rcone(FE * m, FW * m, 0.088, 0.048, k=0.04, bone=f"forearm.{S}", tag="forearm"))
+        # olécranon (punta del codo) y hueso de la muñeca
+        P.append(Prim("sphere", center=(FE + V(0.0, 0.06, 0.02)) * m, r=0.05, k=0.04, bone=f"upperarm.{S}", tag="olecranon"))
+        P.append(Prim("ellipsoid", center=(FW + V(0.0, 0.012, 0.01)) * m, r=(0.056, 0.05, 0.05), k=0.025, bone=f"forearm.{S}", tag="wristbone"))
+        # deltoides y bíceps
+        P.append(ell_along(FS * m, FE * m, (FS * 0.7 + FE * 0.3 + V(0.03, -0.05, 0)) * m, 0.085, 0.15, 0.09,
+                           k=0.05, bone=f"upperarm.{S}", tag="deltoid"))
+        P.append(ell_along(FE * m, FW * m, (FE * 0.72 + FW * 0.28 + V(0, -0.012, 0)) * m, 0.082, 0.14, 0.078,
                            k=0.04, bone=f"forearm.{S}", tag="forearmmuscle"))
-        P.append(rcone(FW * m, (FP + V(0, 0.01, 0.0)) * m, 0.060, 0.060, k=0.03, bone=f"hand.{S}", tag="hand"))
+        P.append(rcone(FW * m, (FP + V(0, 0.01, 0.0)) * m, 0.046, 0.054, k=0.03, bone=f"hand.{S}", tag="hand"))
         P += paw_prims(FP * m, s, f"hand.{S}", f"fingers.{S}", spread=1.0)
         # pata trasera
         P.append(ell_along(HH * m, HK * m, V(0.25, 0.45, 0.76) * m, 0.14, 0.26, 0.21,
                            k=0.08, bone=f"thigh.{S}", tag="thigh"))
         P.append(rcone(HH * m, HK * m, 0.13, 0.085, k=0.06, bone=f"thigh.{S}", tag="thighbone"))
-        P.append(rcone(HK * m, HA * m, 0.092, 0.056, k=0.04, bone=f"shin.{S}", tag="shin"))
+        P.append(rcone(HK * m, HA * m, 0.090, 0.044, k=0.04, bone=f"shin.{S}", tag="shin"))
+        # rótula y calcáneo (punta del corvejón) + tendón
+        P.append(Prim("sphere", center=(HK + V(0, -0.05, 0.01)) * m, r=0.055, k=0.04, bone=f"thigh.{S}", tag="kneecap"))
+        P.append(Prim("ellipsoid", center=(HA + V(0, 0.03, 0.01)) * m, r=(0.045, 0.05, 0.05), k=0.025, bone=f"shin.{S}", tag="calcaneus"))
+        P.append(rcone((HK * 0.55 + HA * 0.45 + V(0, 0.05, 0)) * m, (HA + V(0, 0.045, 0.01)) * m, 0.02, 0.016, k=0.03,
+                       bone=f"shin.{S}", tag="tendon"))
         P.append(ell_along(HK * m, HA * m, (HK * 0.65 + HA * 0.35 + V(0, 0.03, 0)) * m, 0.085, 0.16, 0.09,
                            k=0.04, bone=f"shin.{S}", tag="calf"))
-        P.append(rcone(HA * m, (HB + V(0, 0.01, 0)) * m, 0.058, 0.060, k=0.03, bone=f"foot.{S}", tag="metatarsus"))
+        P.append(rcone(HA * m, (HB + V(0, 0.01, 0)) * m, 0.042, 0.052, k=0.03, bone=f"foot.{S}", tag="metatarsus"))
         P += paw_prims(HB * m, s, f"foot.{S}", f"toes.{S}", spread=0.9)
         # espolón del corvejón
         P.append(rcone(HA * m, (HA + V(0, 0.07, -0.03)) * m, 0.022, 0.004, k=0.015, bone=f"shin.{S}", mat=1, tag="spur"))

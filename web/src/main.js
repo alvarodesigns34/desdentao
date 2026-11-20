@@ -6,6 +6,7 @@ import { createStage, detectQuality } from './stage.js';
 import { loadTextures, assignMaterials, shared } from './materials.js';
 import { Rig, b2t } from './rig.js';
 import { Behavior, MOODS } from './behavior.js';
+import { TailSim, Locomotion } from './physics.js';
 import { CameraDirector } from './camera.js';
 import { UI } from './ui.js';
 
@@ -185,6 +186,8 @@ if (!pickables.some((m) => m.name.startsWith('VesperBody_pick'))) pickables.push
   Object.assign(headRest, { O, F, U, S: 1.13 });
 }
 
+const tailSim = new TailSim(rig, Array.from({ length: 14 }, (_, i) => `tail${String(i + 1).padStart(2, '0')}`));
+const loco = new Locomotion(rig);
 director = new CameraDirector(camera, controls, rig);
 helpers.skeleton = new THREE.SkeletonHelper(model);
 helpers.skeleton.visible = false;
@@ -203,6 +206,7 @@ ui.onToggle = (what, on) => {
   if (what === 'malla') model.traverse((o) => { if (o.isMesh && o.material) o.material.wireframe = on; });
   if (what === 'esqueleto') helpers.skeleton.visible = on;
   if (what === 'bloom') stage.bloom.enabled = on;
+  if (what === 'ao' && stage.gtao) stage.gtao.enabled = on;
 };
 ui.stats({
   tris: rig.meshes.filter((m) => m.visible).reduce((s, m) => s + (m.geometry.index ? m.geometry.index.count / 3 : 0), 0),
@@ -242,6 +246,11 @@ function frame() {
     rig.addRot(name, UP, yaw);
     rig.addRot(name, RIGHT, -pitch);
   }
+  // giro del cuerpo hacia el foco de atención (con pasos)
+  loco.desire(behavior.relYaw, dt);
+  const bodyYaw = loco.update(dt);
+  behavior.bodyYaw = bodyYaw;
+  rig.addRot('root', UP, bodyYaw);
   rig.addRot('chest', RIGHT, 0.018 * (out.values.chestBreath - 0.5));
   rig.addRot('neck1', RIGHT, -0.01 * (out.values.chestBreath - 0.5));
   rig.apply(v, out.slow);
@@ -249,16 +258,16 @@ function frame() {
   // IK de patas (con pata levantada si procede)
   const lift = behavior.ikLift;
   for (const leg of rig.ik) {
-    leg.offset.set(0, 0, 0);
     if (lift && lift.leg && THREE.PropertyBinding.sanitizeNodeName(lift.leg) === leg.end) {
       const u = (behavior.t - lift.start) / lift.dur;
       if (u >= 0 && u <= 1) {
         const k = Math.sin(Math.PI * Math.min(1, u * 1.2)) ** 2;
-        leg.offset.set(0, 0.16 * k, 0.06 * k);
+        leg.offset.add(new THREE.Vector3(0, 0.16 * k, 0.06 * k));
       }
     }
   }
   rig.solveIK();
+  tailSim.update(dt);
   rig.aimEyes(out.gaze, 0.5);
 
   // morphs y uniformes de material
@@ -286,4 +295,4 @@ function frame() {
 requestAnimationFrame(frame);
 
 // para pruebas automatizadas
-window.__vesper = { behavior, rig, director, pick, ui, state, camera, controls };
+window.__vesper = { behavior, rig, director, pick, ui, state, camera, controls, loco, tailSim };

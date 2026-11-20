@@ -238,6 +238,7 @@ def build_body(name, faces, coll, smooth_iters=2):
     set_weights(ob, order, top, names)
     add_uv(me, "bodyuv", bodyuv)
     add_uv(me, "kdata", np.stack([masks["kgrad"], masks["cavity"]], 1))
+    add_uv(me, "bodym", masks["bodym"])
     add_color(me, "masks", np.stack([masks["keratin"], masks["tube"], masks["mouth"], masks["ao"]], 1))
     me.color_attributes.active_color_name = "masks"
     me.color_attributes.render_color_index = me.color_attributes.find("masks")
@@ -577,6 +578,124 @@ def mat_keratin():
     return m
 
 
+def mat_skin(ob):
+    """Piel hiperrealista: escama por regiones con desplazamiento real, moteado, polvo,
+    zonas húmedas, queratina estriada, iridiscencia sutil, SSS y brasa."""
+    m = bpy.data.materials.new("VesperSkin")
+    m.displacement_method = "BUMP"
+    nb = NB(m)
+    out = nb.node("ShaderNodeOutputMaterial")
+    bs = nb.node("ShaderNodeBsdfPrincipled")
+    nb.link(bs.outputs[0], out.inputs[0])
+    gm = generated_meters(nb, ob)
+    sep = lambda sock: (lambda n: (nb.link(sock, n.inputs[0]), n)[1])(nb.node("ShaderNodeSeparateColor")).outputs
+    # --- mapas de escama ---------------------------------------------------
+    gran = sep(box_tex(nb, gm, img("granular_data.png", "Non-Color"), 0.26).outputs[0])
+    med = sep(box_tex(nb, gm, img("scales_data.png", "Non-Color"), 0.30).outputs[0])
+    fine = sep(box_tex(nb, gm, img("granular_data.png", "Non-Color"), 0.09).outputs[0])
+    mk = nb.node("ShaderNodeMapping", vector_type="POINT"); mk.inputs["Scale"].default_value = (1 / 0.36, 1 / 0.30, 1)
+    nb.link(nb.uv("bodym"), mk.inputs[0])
+    kt = nb.node("ShaderNodeTexImage", image=img("keeled_data.png", "Non-Color"), interpolation="Cubic")
+    nb.link(mk.outputs[0], kt.inputs[0])
+    keel = sep(kt.outputs[0])
+    masks = nb.attr("masks")
+    ms = sep(masks.outputs["Color"])
+    ker, tube, mouth = ms[0], ms[1], ms[2]
+    ao = masks.outputs["Alpha"]
+    kd = nb.sep(nb.uv("kdata")); kgrad, cav = kd[0], kd[1]
+    bm = nb.node("ShaderNodeTexImage", image=img("bodymap.png", "Non-Color"), interpolation="Linear", extension="EXTEND")
+    nb.link(nb.uv("bodyuv"), bm.inputs[0])
+    bms = sep(bm.outputs[0])
+    glowmask = nb.math("MULTIPLY", bms[0], tube)
+    scute = nb.math("MULTIPLY", bms[1], tube)
+    belly = nb.math("MULTIPLY", bms[2], tube)
+    bu = nb.sep(nb.uv("bodyuv"))
+    # región: escama aquillada en lomo/cuello/cola, granular en cabeza y patas, lisa-ventral en el vientre
+    wk = nb.math("MULTIPLY", nb.math("POWER", tube, 2.0), nb.math("SUBTRACT", 1.0, belly), clamp=True)
+    hb = nb.mix(wk, gran[0], keel[0])
+    hb = nb.mix(belly, hb, med[0])
+    hb = nb.math("ADD", hb, nb.math("MULTIPLY", fine[0], 0.25))
+    height = nb.math("ADD", nb.math("MULTIPLY", hb, nb.math("SUBTRACT", 1.0, ker)), nb.math("MULTIPLY", scute, 1.2))
+    # estrías de crecimiento de la queratina (cuernos, garras, púas)
+    kstr = nb.node("ShaderNodeTexWave", wave_type="RINGS", rings_direction="SPHERICAL", inputs={"Scale": 60.0, "Distortion": 3.0, "Detail": 3.0})
+    nb.link(gm, kstr.inputs["Vector"])
+    height = nb.math("ADD", height, nb.math("MULTIPLY", ker, nb.math("MULTIPLY", kstr.outputs[1], 0.5)))
+    rnd = nb.mix(wk, gran[1], keel[1]); rnd = nb.mix(belly, rnd, med[1])
+    crev = nb.mix(wk, gran[2], keel[2]); crev = nb.mix(belly, crev, med[2])
+    # --- ruido de gran escala (moteado y matiz) -------------------------------
+    n1 = nb.node("ShaderNodeTexNoise", inputs={"Scale": 1.6, "Detail": 6.0, "Roughness": 0.6})
+    n2 = nb.node("ShaderNodeTexNoise", inputs={"Scale": 7.0, "Detail": 3.0, "Roughness": 0.5})
+    nb.link(gm, n1.inputs["Vector"]); nb.link(gm, n2.inputs["Vector"])
+    vr = nb.node("ShaderNodeMapRange", inputs={"From Min": 0.2, "From Max": 0.7}); nb.link(bu[1], vr.inputs[0])
+    col = nb.mix(vr.outputs[0], (0.0075, 0.0085, 0.011, 1), (0.015, 0.016, 0.021, 1))
+    col = nb.mix(nb.math("MULTIPLY", n1.outputs[0], 0.7), col, (0.011, 0.015, 0.015, 1))        # matiz verdoso
+    col = nb.mix(nb.math("MULTIPLY", n2.outputs[0], 0.45), col, (0.018, 0.013, 0.010, 1))       # matiz bronce
+    mott = nb.node("ShaderNodeMapRange", inputs={"From Min": 0.45, "From Max": 0.62, "To Min": 1.0, "To Max": 0.62})
+    nb.link(n1.outputs[0], mott.inputs[0])                                                    # manchas dorsales
+    mm = nb.node("ShaderNodeCombineColor"); [nb.link(mott.outputs[0], mm.inputs[i]) for i in range(3)]
+    col = nb.mix(nb.math("SUBTRACT", 1.0, vr.outputs[0]), col, nb.mix(1.0, col, mm.outputs[0], "MULTIPLY"))
+    col = nb.mix(belly, col, (0.050, 0.041, 0.034, 1))
+    # escama a escama: variación, puntas pulidas algo más claras, juntas oscuras
+    var = nb.math("MULTIPLY_ADD", rnd, 0.36, 0.82)
+    tip = nb.math("MULTIPLY_ADD", hb, 0.45, 0.80)
+    k1 = nb.math("MULTIPLY", var, tip)
+    k2 = nb.math("MULTIPLY_ADD", crev, -0.55, 1.0)
+    kk = nb.math("MULTIPLY", k1, k2)
+    kc = nb.node("ShaderNodeCombineColor"); [nb.link(kk, kc.inputs[i]) for i in range(3)]
+    col = nb.mix(1.0, col, kc.outputs[0], "MULTIPLY")
+    # polvo en las juntas de las zonas bajas (patas, vientre)
+    zsep = nb.sep(gm)
+    low = nb.node("ShaderNodeMapRange", inputs={"From Min": 0.55, "From Max": 0.05}); nb.link(zsep[2], low.inputs[0])
+    dust = nb.math("MULTIPLY", nb.math("MULTIPLY", crev, low.outputs[0]), nb.math("MULTIPLY_ADD", n2.outputs[0], 0.8, 0.2), clamp=True)
+    col = nb.mix(nb.math("MULTIPLY", dust, 0.8), col, (0.070, 0.062, 0.052, 1))
+    # queratina: base oscura -> punta hueso, con estrías longitudinales
+    strn = nb.node("ShaderNodeTexWave", wave_type="BANDS", bands_direction="Z", inputs={"Scale": 40.0, "Distortion": 6.0, "Detail": 4.0})
+    nb.link(gm, strn.inputs["Vector"])
+    kcol = nb.mix(nb.math("POWER", kgrad, 2.2), (0.014, 0.012, 0.011, 1), (0.085, 0.070, 0.050, 1))
+    kcol = nb.mix(nb.math("MULTIPLY", strn.outputs[1], 0.35), kcol, (0.010, 0.009, 0.008, 1))
+    col = nb.mix(ker, col, kcol)
+    col = nb.mix(mouth, col, (0.16, 0.028, 0.032, 1))
+    col = nb.mix(cav, col, (0.003, 0.002, 0.002, 1))
+    aop = nb.math("POWER", ao, 0.9)
+    aoc = nb.node("ShaderNodeCombineColor"); [nb.link(aop, aoc.inputs[i]) for i in range(3)]
+    col = nb.mix(1.0, col, aoc.outputs[0], "MULTIPLY")
+    nb.link(col, bs.inputs["Base Color"])
+    # --- rugosidad --------------------------------------------------------------
+    wet = nb.math("MAXIMUM", nb.math("MULTIPLY", mouth, 1.0), cav)
+    r = nb.math("MULTIPLY_ADD", crev, 0.24, 0.56)
+    r = nb.math("SUBTRACT", r, nb.math("MULTIPLY", hb, 0.14))
+    r = nb.math("ADD", r, nb.math("MULTIPLY", rnd, 0.08))
+    r = nb.math("ADD", r, nb.math("MULTIPLY", dust, 0.25))
+    r = nb.mix(ker, r, nb.math("MULTIPLY_ADD", strn.outputs[1], 0.12, 0.28))
+    r = nb.mix(wet, r, 0.16)
+    nb.link(r, bs.inputs["Roughness"])
+    nb.link(nb.math("MULTIPLY", wet, 0.6), bs.inputs["Coat Weight"])
+    bs.inputs["Coat Roughness"].default_value = 0.08
+    # --- relieve fino (bump) + desplazamiento real -----------------------------
+    bump = nb.node("ShaderNodeBump", inputs={"Strength": 0.35, "Distance": 0.0012})
+    nb.link(nb.math("MULTIPLY", fine[0], 0.6), bump.inputs["Height"])
+    nb.link(bump.outputs[0], bs.inputs["Normal"])
+    disp = nb.node("ShaderNodeDisplacement", inputs={"Midlevel": 0.45, "Scale": 0.0024})
+    nb.link(height, disp.inputs["Height"])
+    nb.link(disp.outputs[0], out.inputs["Displacement"])
+    # --- iridiscencia sutil (sólo cuerpo), SSS, especular -------------------
+    tf = nb.math("MULTIPLY", tube, nb.math("MULTIPLY_ADD", n2.outputs[0], 160.0, 200.0))
+    nb.link(tf, bs.inputs["Thin Film Thickness"])
+    bs.inputs["Thin Film IOR"].default_value = 1.36
+    bs.inputs["Subsurface Weight"].default_value = 0.05
+    bs.inputs["Subsurface Radius"].default_value = (1.0, 0.28, 0.12)
+    bs.inputs["Subsurface Scale"].default_value = 0.01
+    bs.inputs["Specular IOR Level"].default_value = 0.38
+    # --- brasa --------------------------------------------------------------
+    glow = nb.drv_value("glow", RD.NEUTRAL["glow"])
+    throat = nb.drv_value("throat", 0.0)
+    es = nb.math("MULTIPLY", nb.math("ADD", nb.math("MULTIPLY", glowmask, glow),
+                                     nb.math("MULTIPLY", nb.math("MULTIPLY", mouth, throat), 0.012)), 7.0)
+    nb.link(es, bs.inputs["Emission Strength"])
+    bs.inputs["Emission Color"].default_value = GLOW_COL
+    return m
+
+
 MATS = {
     "Skin": mat_skin(body),
     "Lid": mat_lid(),
@@ -607,6 +726,14 @@ def skin(ob):
 
 for ob in [body] + part_obs:
     skin(ob)
+# microdesplazamiento: subdivisión adaptativa en render (Cycles) para que la escama sea geometría real
+# NOTA: el desplazamiento real con subdivisión adaptativa agota los 15 GB de este entorno con
+# una malla de 600k caras; se deja preparado pero desactivado y se usa relieve (bump) desde la
+# misma altura. Con más memoria: activar el modificador y poner displacement_method = "BOTH".
+_sub = body.modifiers.new("Microdesplazamiento", "SUBSURF")
+_sub.levels = 0; _sub.render_levels = 1; _sub.subdivision_type = "SIMPLE"
+_sub.show_render = False; _sub.show_viewport = False
+body.cycles.use_adaptive_subdivision = False
 SK_DRIVERS = {"Breathe": "breath", "ThroatPuff": "throat", "Snarl": "snarl", "NostrilFlare": "nostril", "Smile": "smile"}
 for kname, prop in SK_DRIVERS.items():
     kb = body.data.shape_keys.key_blocks[kname]
@@ -812,7 +939,21 @@ bs.inputs["Roughness"].default_value = 0.42; bs.inputs["Specular IOR Level"].def
 floor.data.materials.append(fm)
 # mundo
 world = bpy.data.worlds.new("Noche"); scene.world = world; world.use_nodes = True
-bg = world.node_tree.nodes["Background"]; bg.inputs[0].default_value = (0.006, 0.007, 0.011, 1); bg.inputs[1].default_value = 1.0
+wn = world.node_tree.nodes; wl = world.node_tree.links
+bg = wn["Background"]; bg.inputs[0].default_value = (0.006, 0.007, 0.011, 1); bg.inputs[1].default_value = 1.0
+# HDRI de estudio (Poly Haven, CC0) sólo para iluminación y reflejos; la cámara ve el fondo oscuro
+hdr_path = os.path.join(ROOT, "assets", "hdri", "studio_2k.hdr")
+if os.path.exists(hdr_path):
+    env = wn.new("ShaderNodeTexEnvironment"); env.image = bpy.data.images.load(hdr_path)
+    mapw = wn.new("ShaderNodeMapping"); tcw = wn.new("ShaderNodeTexCoord")
+    mapw.inputs["Rotation"].default_value = (0, 0, math.radians(120))
+    wl.new(tcw.outputs["Generated"], mapw.inputs[0]); wl.new(mapw.outputs[0], env.inputs[0])
+    bg2 = wn.new("ShaderNodeBackground"); bg2.inputs[1].default_value = 0.22
+    wl.new(env.outputs[0], bg2.inputs[0])
+    lp = wn.new("ShaderNodeLightPath"); mixw = wn.new("ShaderNodeMixShader")
+    wl.new(lp.outputs["Is Camera Ray"], mixw.inputs[0])
+    wl.new(bg2.outputs[0], mixw.inputs[1]); wl.new(bg.outputs[0], mixw.inputs[2])
+    wl.new(mixw.outputs[0], wn["World Output"].inputs[0])
 
 CAMS = {
     "Cam_Heroe": ((4.6, -5.6, 2.25), (0.0, -0.35, 1.05), 50, None),
@@ -837,6 +978,11 @@ scene.camera = bpy.data.objects["Cam_Heroe"]
 scene.render.engine = "CYCLES"
 scene.cycles.device = "CPU"
 scene.cycles.samples = 192
+scene.cycles.feature_set = "EXPERIMENTAL"
+scene.cycles.dicing_rate = 1.0
+scene.cycles.offscreen_dicing_scale = 30.0
+scene.cycles.max_subdivisions = 3
+scene.cycles.dicing_rate = 1.5
 scene.cycles.use_denoising = True
 scene.cycles.denoiser = "OPENIMAGEDENOISE"
 scene.render.resolution_x, scene.render.resolution_y = 1920, 1080
@@ -864,6 +1010,75 @@ if DO_WEB:
         C_WEB.objects.link(o2)
         o2.modifiers.clear(); skin(o2)
         web_parts.append(o2)
+    # ---------------------------------------------------------------------
+    # Horneado: del modelo de alta resolución (con su material completo) al web
+    # ---------------------------------------------------------------------
+    BAKE_DIR = os.path.join(ROOT, "assets", "bake"); os.makedirs(BAKE_DIR, exist_ok=True)
+    arm.animation_data.action = None
+    for pb in arm.pose.bones:
+        pb.rotation_quaternion = Quaternion(); pb.location = Vector()
+        for c in pb.constraints:
+            c.mute = True
+    for k in RD.EXTRA:
+        arm[k] = 0.0
+    bpy.context.view_layer.update()
+    me = web_body.data
+    me.uv_layers.new(name="bake")
+    me.uv_layers.active = me.uv_layers["bake"]
+    bpy.ops.object.select_all(action="DESELECT")
+    bpy.context.view_layer.objects.active = web_body; web_body.select_set(True)
+    # desplegar sobre una copia muy suavizada (misma topología): islas grandes y limpias
+    _co = np.zeros(len(me.vertices) * 3, np.float32); me.vertices.foreach_get("co", _co)
+    _sk = web_body.data.shape_keys
+    web_body.active_shape_key_index = 0
+    bm_ = bmesh.new(); bm_.from_mesh(me)
+    for _ in range(40):
+        bmesh.ops.smooth_vert(bm_, verts=bm_.verts, factor=0.6, use_axis_x=True, use_axis_y=True, use_axis_z=True)
+    _sm = np.array([v.co[:] for v in bm_.verts], np.float32).ravel(); bm_.free()
+    me.vertices.foreach_set("co", _sm); me.update()
+    bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(angle_limit=math.radians(70), island_margin=0.003, scale_to_bounds=False)
+    bpy.ops.uv.average_islands_scale()
+    bpy.ops.uv.pack_islands(rotate=True, margin=0.003)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    me.vertices.foreach_set("co", _co); me.update()
+    if _sk:
+        _sk.key_blocks[0].data.foreach_set("co", _co)
+    tgt = bpy.data.materials.new("BakeTarget"); tgt.use_nodes = True
+    tnode = tgt.node_tree.nodes.new("ShaderNodeTexImage")
+    tgt.node_tree.nodes.active = tnode
+    web_body.data.materials[0] = tgt
+    skin_mat = MATS["Skin"]; skin_mat.displacement_method = "BUMP"
+    body.modifiers["Microdesplazamiento"].show_render = False
+    sc_ = bpy.context.scene
+    C_WEB.hide_render = False
+    sc_.render.bake.use_selected_to_active = True
+    sc_.render.bake.cage_extrusion = 0.015
+    sc_.render.bake.max_ray_distance = 0.04
+    sc_.render.bake.margin = 16
+    bpy.ops.object.select_all(action="DESELECT")
+    body.select_set(True); web_body.select_set(True); bpy.context.view_layer.objects.active = web_body
+
+    def do_bake(name, size, kind, samples=1, **kw):
+        im = bpy.data.images.new(name, size, size, alpha=False, float_buffer=False)
+        im.colorspace_settings.name = "sRGB" if kind == "DIFFUSE" else "Non-Color"
+        tnode.image = im
+        sc_.cycles.samples = samples
+        t0 = time.time()
+        bpy.ops.object.bake(type=kind, **kw)
+        im.filepath_raw = os.path.join(BAKE_DIR, name + ".png"); im.file_format = "PNG"; im.save()
+        log(f"horneado {name} ({kind}, {size}px) en {time.time()-t0:.0f}s")
+
+    do_bake("bake_normal", 4096, "NORMAL", 12, normal_space="TANGENT")
+    do_bake("bake_color", 2048, "DIFFUSE", 6, pass_filter={"COLOR"})
+    do_bake("bake_rough", 2048, "ROUGHNESS", 6)
+    sc_.cycles.samples = 192
+    C_WEB.hide_render = True
+    skin_mat.displacement_method = "BUMP"
+    web_body.data.materials[0] = MATS["Skin"]
+    for nm in ("kdata", "bodym"):
+        me.uv_layers.remove(me.uv_layers[nm])
+    me.uv_layers.active = me.uv_layers["bodyuv"]
     # pose de reposo pura para exportar
     arm.animation_data.action = None
     for pb in arm.pose.bones:

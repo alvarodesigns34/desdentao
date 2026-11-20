@@ -14,12 +14,16 @@ sys.path.insert(0, os.path.join(HERE, "lib"))
 from sdf import mesh_from_prims  # noqa
 import anatomy  # noqa
 
-h = float(sys.argv[1]) if len(sys.argv) > 1 else 0.0025
-out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "..", "build", "body_raw.npz")
+h = float(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else 0.0025
+out = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("-") else os.path.join(HERE, "..", "build", "body_raw.npz")
 os.makedirs(os.path.dirname(out), exist_ok=True)
 
 t = time.time()
 prims = anatomy.build_prims()
+import sdf, detail  # noqa
+if "--no-detail" not in sys.argv:
+    sdf.DETAILS = detail.build_details()
+    print(f"{len(sdf.DETAILS)} capas de detalle anatómico")
 print(f"{len(prims)} primitivas")
 lo, hi = anatomy.BOUNDS
 V, F = mesh_from_prims(prims, lo, hi, h, block=112 if h < 0.004 else 80, coarse=max(0.015, h * 4))

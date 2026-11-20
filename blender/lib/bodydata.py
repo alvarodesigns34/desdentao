@@ -161,6 +161,8 @@ def compute(prims, V, N, bones, chunk=40000, log=print):
         best_s = np.where(m, (cum[i] + t) / total, best_s)
         best_th = np.where(m, th, best_th)
     bodyuv = np.stack([best_s, np.abs(best_th) / np.pi], 1)
+    # coordenadas métricas para orientar las escamas imbricadas a lo largo del cuerpo
+    bodym = np.stack([best_s * total, np.abs(best_th) * best_d], 1)
 
     # --- oclusión ambiental por SDF -----------------------------------------
     ao = np.zeros(nV)
@@ -173,7 +175,7 @@ def compute(prims, V, N, bones, chunk=40000, log=print):
         wsum += w
     ao = np.clip(1 - 1.3 * ao / wsum, 0, 1)
 
-    masks = dict(keratin=ker, tube=tube, kgrad=kgrad, mouth=mouth, cavity=cav, ao=ao.astype(np.float32))
+    masks = dict(keratin=ker, tube=tube, kgrad=kgrad, mouth=mouth, cavity=cav, ao=ao.astype(np.float32), bodym=bodym)
     return weights, masks, bodyuv
 
 

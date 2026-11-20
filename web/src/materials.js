@@ -56,62 +56,43 @@ function restVaryings(shader, extraVert = '') {
 }
 
 export function makeSkin(tex) {
+  // Color, normal, rugosidad y oclusión horneados desde el modelo de alta resolución (Cycles),
+  // más microdetalle triplanar que sólo aparece de cerca y la brasa animada en coordenadas corporales.
   const m = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff, roughness: 0.5, metalness: 0,
+    color: 0xffffff, map: tex.bakeColor, normalMap: tex.bakeNormal, normalScale: new THREE.Vector2(0.85, 0.85),
+    roughnessMap: tex.bakeOrm, roughness: 1.25, metalness: 0,
     vertexColors: true,
-    iridescence: 0.30, iridescenceIOR: 1.38, iridescenceThicknessRange: [280, 480],
-    clearcoat: 0.03, clearcoatRoughness: 0.4,
-    sheen: 0.12, sheenColor: new THREE.Color(0.10, 0.12, 0.18), sheenRoughness: 0.6,
-    specularIntensity: 0.38, envMapIntensity: 0.6,
+    iridescence: 0.18, iridescenceIOR: 1.36, iridescenceThicknessRange: [200, 360],
+    sheen: 0.08, sheenColor: new THREE.Color(0.10, 0.12, 0.16), sheenRoughness: 0.6,
+    specularIntensity: 0.4, envMapIntensity: 0.45,
   });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
-      tScales: { value: tex.scales }, tBody: { value: tex.body },
+      tFine: { value: tex.granular },
       uGlow: shared.uGlow, uThroat: shared.uThroat, uTime: shared.uTime, uGlowColor: shared.uGlowColor,
-      uBump: { value: 1.0 },
+      tBody: { value: tex.body },
     });
-    restVaryings(sh, `varying vec2 vBUV; varying vec2 vKD;
-      #ifndef USE_UV1
-        attribute vec2 uv1;
-      #endif`);
+    restVaryings(sh, 'varying vec2 vBUV;');
     sh.vertexShader = sh.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
-      vBUV = uv; vKD = uv1;`);
+      vBUV = uv;`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D tScales; uniform sampler2D tBody;
-        uniform float uGlow; uniform float uThroat; uniform float uTime; uniform vec3 uGlowColor; uniform float uBump;
-        varying vec3 vRest; varying vec3 vRestN; varying vec2 vBUV; varying vec2 vKD;
+        uniform sampler2D tFine; uniform sampler2D tBody;
+        uniform float uGlow; uniform float uThroat; uniform float uTime; uniform vec3 uGlowColor;
+        varying vec3 vRest; varying vec3 vRestN; varying vec2 vBUV;
         ${BUMP_FN}`)
       .replace('#include <color_fragment>', `
-        vec3 rn = normalize( vRestN );
-        vec3 sc  = triplanar( tScales, vRest, rn, 0.30 );
-        vec3 scf = triplanar( tScales, vRest + 0.37, rn, 0.11 );
+        float ker = vColor.r, tube = vColor.g, mouthM = vColor.b;
+        diffuseColor.rgb *= pow( max( vColor.a, 0.0 ), 0.9 );
         vec3 bm = texture2D( tBody, vBUV ).rgb;
-        float ker = vColor.r, tube = vColor.g, mouthM = vColor.b, aoV = vColor.a;
-        float belly = bm.b * tube, scute = bm.g * tube, glowM = bm.r * tube;
-        vec3 cBack = vec3( 0.010, 0.011, 0.016 ), cFlank = vec3( 0.020, 0.021, 0.031 ), cBelly = vec3( 0.068, 0.056, 0.048 );
-        vec3 col = mix( cBack, cFlank, smoothstep( 0.25, 0.65, vBUV.y ) );
-        col = mix( col, cBelly, belly );
-        float nz = vnoise( vRest * 3.0 ) * 0.6 + vnoise( vRest * 7.0 ) * 0.4;
-        col *= ( 0.80 + 0.35 * sc.g ) * ( 0.75 + 0.5 * nz ) * ( 1.0 - 0.45 * sc.b );
-        vec3 kc = mix( vec3( 0.020, 0.018, 0.016 ), vec3( 0.16, 0.135, 0.10 ), pow( clamp( vKD.x, 0.0, 1.0 ), 1.7 ) );
-        col = mix( col, kc, ker );
-        col = mix( col, vec3( 0.20, 0.035, 0.04 ), mouthM );
-        col = mix( col, vec3( 0.004, 0.003, 0.003 ), vKD.y );
-        col *= pow( max( aoV, 0.0 ), 0.8 );
-        diffuseColor.rgb = col;
-        float hgt = sc.r * ( 1.0 - ker ) + 0.35 * scf.r + 1.4 * scute;
-        float roughV = 0.55 + 0.18 * sc.b + 0.10 * sc.g + 0.08 * belly;
-        roughV = mix( roughV, 0.42, ker ); roughV = mix( roughV, 0.22, mouthM );
-      `)
-      .replace('#include <roughnessmap_fragment>', `float roughnessFactor = roughV;`)
+        float glowM = bm.r * tube;
+        vec3 fineS = triplanar( tFine, vRest + 0.21, normalize( vRestN ), 0.09 );
+        float hgt = fineS.r * ( 1.0 - ker );`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         {
-          // relieve por derivadas en pantalla (independiente de la escala); se atenúa
-          // a distancia para evitar el centelleo de las escamas sub-píxel
-          float fw = clamp( 0.004 / max( length( fwidth( vRest ) ), 1e-5 ), 0.0, 1.0 );
-          vec2 dHdxy = vec2( dFdx( hgt ), dFdy( hgt ) ) * 0.55 * uBump * fw;
-          normal = perturbNormalH( -vViewPosition, normal, dHdxy, faceDirection );
+          // microescama: sólo cuando cada escama ocupa varios píxeles (evita centelleo)
+          float fw = clamp( 0.0012 / max( length( fwidth( vRest ) ), 1e-5 ) - 0.3, 0.0, 1.0 );
+          normal = perturbNormalH( -vViewPosition, normal, vec2( dFdx( hgt ), dFdy( hgt ) ) * 0.2 * fw, faceDirection );
         }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         float flow = 0.80 + 0.20 * sin( vBUV.x * 70.0 - uTime * 1.6 );
@@ -232,7 +213,11 @@ export function loadTextures(manager) {
   body.wrapS = body.wrapT = THREE.ClampToEdgeWrapping;
   const veins = lin('textures/wing_veins.webp', false);
   veins.colorSpace = THREE.NoColorSpace;
-  return { scales: lin('textures/scales_data.webp'), body, iris, veins };
+  const ch1 = (t) => { t.channel = 1; t.flipY = false; return t; };
+  const bakeColor = ch1(L.load('textures/bake_color.webp')); bakeColor.colorSpace = THREE.SRGBColorSpace; bakeColor.anisotropy = 8;
+  const bakeNormal = ch1(lin('textures/bake_normal.webp', false));
+  const bakeOrm = ch1(lin('textures/bake_orm.webp', false));
+  return { scales: lin('textures/scales_data.webp'), granular: lin('textures/granular_data.webp'), body, iris, veins, bakeColor, bakeNormal, bakeOrm };
 }
 
 // Asigna materiales por nombre de malla
