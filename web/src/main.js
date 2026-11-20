@@ -157,7 +157,7 @@ function pick(x, y) {
 // --- carga -------------------------------------------------------------------------
 const tex = loadTextures(manager);
 const [gltf, rigDef] = await Promise.all([
-  new GLTFLoader(manager).loadAsync('vesper.glb'),
+  new GLTFLoader(manager).loadAsync(window.VESPER_MODEL || 'vesper.glb'),
   fetch('rig.json').then((r) => r.json()),
 ]);
 const model = gltf.scene;
