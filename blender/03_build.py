@@ -183,8 +183,11 @@ for name, (h, t, p, d) in BONES.items():
 IK = {}
 for sx, s in (("L", 1), ("R", -1)):
     for leg, bone, pole_off in (("hand", f"hand.{sx}", (0, 0.9, 0)), ("foot", f"foot.{sx}", (0, -0.9, 0))):
-        tip = Vector(BONES[bone][1])
-        c = eb.new(f"IK_{leg}.{sx}"); c.head = tip; c.tail = tip + Vector((0, 0.15, 0)); c.use_deform = False
+        # el control IK se coloca en la cabeza del hueso final (muñeca / corvejón) y con su misma
+        # orientación, de modo que en reposo la cadena no cambia y la pata copia su rotación
+        h0, t0 = Vector(BONES[bone][0]), Vector(BONES[bone][1])
+        c = eb.new(f"IK_{leg}.{sx}"); c.head = h0; c.tail = t0; c.use_deform = False
+        c.roll = eb[bone].roll
         c.parent = eb["root"]
         lower = f"forearm.{sx}" if leg == "hand" else f"shin.{sx}"
         mid = Vector(BONES[lower][0])
@@ -201,7 +204,7 @@ for lower, (tgt, pole) in IK.items():
     pe = arm.pose.bones[lower.replace("forearm", "hand").replace("shin", "foot")]
     cr = pe.constraints.new("COPY_ROTATION"); cr.target = arm; cr.subtarget = tgt
     cr.mix_mode = "REPLACE"; cr.target_space = "WORLD"; cr.owner_space = "WORLD"
-    cr.influence = 0.0  # se deja preparado; las acciones animan la influencia si hace falta
+    cr.influence = 1.0
 for pb in arm.pose.bones:
     pb.rotation_mode = "QUATERNION"
 # grupos de color (colecciones de huesos)
@@ -537,16 +540,17 @@ def mat_membrane(name, veins_scale=(1.0, 1.0), kind="wing"):
     veins, thick, edge = vs.outputs[0], vs.outputs[1], vs.outputs[2]
     base = nb.mix(veins, (0.020, 0.019, 0.027, 1), (0.008, 0.007, 0.010, 1))
     nb.link(base, bs.inputs["Base Color"])
-    nb.link(nb.math("MULTIPLY_ADD", thick, 0.15, 0.45), bs.inputs["Roughness"])
+    nb.link(nb.math("MULTIPLY_ADD", thick, 0.15, 0.62), bs.inputs["Roughness"])
+    bs.inputs["Specular IOR Level"].default_value = 0.3
     bump = nb.node("ShaderNodeBump", inputs={"Strength": 0.6, "Distance": 0.002})
     nb.link(veins, bump.inputs["Height"]); nb.link(bump.outputs[0], bs.inputs["Normal"])
     bs.inputs["Thin Film Thickness"].default_value = 300
     bs.inputs["Coat Weight"].default_value = 0.05
     # translucidez: rojo profundo, venas más opacas
-    tcol = nb.mix(veins, (0.07, 0.016, 0.013, 1), (0.012, 0.003, 0.003, 1))
+    tcol = nb.mix(veins, (0.05, 0.010, 0.009, 1), (0.008, 0.002, 0.002, 1))
     nb.link(tcol, tr.inputs["Color"])
     nb.link(bump.outputs[0], tr.inputs["Normal"])
-    fac = nb.math("MULTIPLY_ADD", thick, -0.06, 0.16)
+    fac = nb.math("MULTIPLY_ADD", thick, -0.04, 0.10)
     nb.link(fac, mx.inputs[0]); nb.link(bs.outputs[0], mx.inputs[1]); nb.link(tr.outputs[0], mx.inputs[2])
     # brillo en el borde de fuga
     glow = nb.drv_value("glow", RD.NEUTRAL["glow"])

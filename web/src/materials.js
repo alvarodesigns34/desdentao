@@ -17,14 +17,18 @@ export const shared = {
 
 const BUMP_FN = /* glsl */`
 vec3 perturbNormalH( vec3 surf_pos, vec3 surf_norm, vec2 dHdxy, float faceDirection ) {
-  vec3 vSigmaX = normalize( dFdx( surf_pos.xyz ) );
-  vec3 vSigmaY = normalize( dFdy( surf_pos.xyz ) );
+  // protegido frente a derivadas nulas (líneas, triángulos de canto): evita NaN que el bloom propagaría
+  vec3 dx = dFdx( surf_pos.xyz ), dy = dFdy( surf_pos.xyz );
+  if ( dot( dx, dx ) < 1e-14 || dot( dy, dy ) < 1e-14 ) return surf_norm;
+  vec3 vSigmaX = normalize( dx );
+  vec3 vSigmaY = normalize( dy );
   vec3 vN = surf_norm;
   vec3 R1 = cross( vSigmaY, vN );
   vec3 R2 = cross( vN, vSigmaX );
   float fDet = dot( vSigmaX, R1 ) * faceDirection;
   vec3 vGrad = sign( fDet ) * ( dHdxy.x * R1 + dHdxy.y * R2 );
-  return normalize( abs( fDet ) * surf_norm - vGrad );
+  vec3 r = abs( fDet ) * surf_norm - vGrad;
+  return dot( r, r ) > 1e-12 ? normalize( r ) : surf_norm;
 }
 vec3 triplanar( sampler2D t, vec3 p, vec3 n, float scale ) {
   vec3 w = pow( abs( n ), vec3( 4.0 ) );
@@ -171,7 +175,7 @@ export function makeCornea() {
 }
 
 export function makeMembrane(tex, kind = 'wing') {
-  const m = new THREE.MeshStandardMaterial({ map: tex.veins, roughness: 0.5, side: THREE.DoubleSide });
+  const m = new THREE.MeshPhysicalMaterial({ map: tex.veins, roughness: 0.7, side: THREE.DoubleSide, envMapIntensity: 0.35, specularIntensity: 0.35 });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
       uGlow: shared.uGlow, uGlowColor: shared.uGlowColor, uTime: shared.uTime,
@@ -180,6 +184,7 @@ export function makeMembrane(tex, kind = 'wing') {
     });
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
+        ${BUMP_FN}
         uniform float uGlow; uniform vec3 uGlowColor; uniform float uTime; uniform float uEdgeGain;
         uniform vec3 uBackDir[3]; uniform vec3 uBackCol[3];`)
       .replace('#include <map_fragment>', `
@@ -187,15 +192,9 @@ export function makeMembrane(tex, kind = 'wing') {
         float veins = vt.r, thick = vt.g, edge = vt.b;
         diffuseColor.rgb = mix( vec3( 0.026, 0.025, 0.034 ), vec3( 0.010, 0.008, 0.012 ), veins );
         float hgt = veins;`)
-      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = 0.45 + 0.15 * thick;')
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = 0.68 + 0.15 * thick;')
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-        {
-          vec3 sx = normalize( dFdx( -vViewPosition ) ), sy = normalize( dFdy( -vViewPosition ) );
-          vec3 R1 = cross( sy, normal ), R2 = cross( normal, sx );
-          float det = dot( sx, R1 ) * faceDirection;
-          vec2 g = vec2( dFdx( hgt ), dFdy( hgt ) ) * 0.6;
-          normal = normalize( abs( det ) * normal - sign( det ) * ( g.x * R1 + g.y * R2 ) );
-        }`)
+        normal = perturbNormalH( -vViewPosition, normal, vec2( dFdx( hgt ), dFdy( hgt ) ) * 0.6, faceDirection );`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
           // translucidez: luz que atraviesa la membrana desde detrás
@@ -251,8 +250,8 @@ export function assignMaterials(model, tex) {
     else if (n.startsWith('Lid')) o.material = lid;
     else if (n.startsWith('Eye')) o.material = eye;
     else if (n.startsWith('Cornea')) { o.material = cornea; o.castShadow = false; o.renderOrder = 2; }
-    else if (n.startsWith('Wing')) o.material = wing;
-    else if (n.includes('Membrane')) o.material = frill;
+    else if (n.startsWith('Wing')) { o.material = wing; o.receiveShadow = false; }
+    else if (n.includes('Membrane')) { o.material = frill; o.receiveShadow = false; }
     else if (n.includes('Spines')) o.material = basic.keratin;
     else if (n.startsWith('Teeth')) o.material = basic.teeth;
     else if (n.startsWith('Tongue')) o.material = basic.mouth;
