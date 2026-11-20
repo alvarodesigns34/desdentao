@@ -453,7 +453,7 @@ def mat_skin(ob):
     pulse = nb.math("MULTIPLY", glowmask, glow)
     throat = nb.drv_value("throat", 0.0)
     nb.link(pulse, bs.inputs["Emission Strength"]) if False else None
-    es = nb.math("MULTIPLY", nb.math("ADD", pulse, nb.math("MULTIPLY", nb.math("MULTIPLY", mouth, throat), 0.012)), 7.0)
+    es = nb.math("MULTIPLY", nb.math("ADD", pulse, nb.math("MULTIPLY", nb.math("MULTIPLY", mouth, throat), 0.0012)), 7.0)
     nb.link(es, bs.inputs["Emission Strength"])
     bs.inputs["Emission Color"].default_value = GLOW_COL
     return m
@@ -690,7 +690,7 @@ def mat_skin(ob):
     glow = nb.drv_value("glow", RD.NEUTRAL["glow"])
     throat = nb.drv_value("throat", 0.0)
     es = nb.math("MULTIPLY", nb.math("ADD", nb.math("MULTIPLY", glowmask, glow),
-                                     nb.math("MULTIPLY", nb.math("MULTIPLY", mouth, throat), 0.012)), 7.0)
+                                     nb.math("MULTIPLY", nb.math("MULTIPLY", mouth, throat), 0.0012)), 7.0)
     nb.link(es, bs.inputs["Emission Strength"])
     bs.inputs["Emission Color"].default_value = GLOW_COL
     return m
