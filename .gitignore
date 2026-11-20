@@ -1,0 +1,6 @@
+# artefactos regenerables
+build/
+web/node_modules/
+web/dist/
+*.blend1
+__pycache__/

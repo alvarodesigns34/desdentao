@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Vesper · Estudio</title>
+  <meta name="description" content="Vesper, un dragón nocturno original, en un estudio 3D interactivo en tiempo real." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,560;1,9..144,400&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body data-mode="interactuar">
+  <canvas id="scene" aria-label="Vesper, dragón en 3D. Arrastra sobre él para acariciarlo, toca zonas de su cuerpo para provocar reacciones."></canvas>
+
+  <div id="loader" role="status" aria-live="polite">
+    <p class="wordmark">Vesper</p>
+    <div class="loader-track"><span id="loader-bar"></span></div>
+    <p class="loader-meta"><span id="loader-pct">0</span>&thinsp;% · preparando el estudio</p>
+  </div>
+
+  <header class="brand">
+    <p class="wordmark">Vesper</p>
+    <p class="eyebrow">Dragón nocturno · estudio en tiempo real</p>
+  </header>
+
+  <section class="dock" aria-label="Estado y ánimo">
+    <p class="status"><span id="ember" class="ember" aria-hidden="true"></span><span id="status-text" aria-live="polite">Vesper está en calma</span></p>
+    <nav id="moods" class="moods" aria-label="Ánimo de Vesper"></nav>
+  </section>
+
+  <aside class="tools" aria-label="Herramientas">
+    <div class="seg" role="group" aria-label="Modo">
+      <button class="tool" data-mode-btn="interactuar" aria-pressed="true" title="Interactuar: acaricia y toca a Vesper">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-1.5V4a1.5 1.5 0 0 1 3 0v6m0-4.5a1.5 1.5 0 0 1 3 0V12m0-3a1.5 1.5 0 0 1 3 0v4.5c0 4-2.7 7-6.5 7-2.6 0-4.2-1.2-5.6-3.3L4.6 13.6a1.6 1.6 0 0 1 2.6-1.8L8 13"/></svg>
+        <span class="tool-label">Interactuar</span>
+      </button>
+      <button class="tool" data-mode-btn="inspeccionar" aria-pressed="false" title="Inspeccionar: cámara orbital libre y capas técnicas">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><ellipse cx="12" cy="12" rx="9.5" ry="4.2"/><ellipse cx="12" cy="12" rx="4.2" ry="9.5"/></svg>
+        <span class="tool-label">Inspeccionar</span>
+      </button>
+    </div>
+    <span class="tools-rule" aria-hidden="true"></span>
+    <div class="menu-wrap">
+      <button class="tool" data-menu="cam-list" aria-expanded="false" title="Encuadres de cámara">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="13" height="10" rx="1.5"/><path d="M16 10.5l5-3v9l-5-3"/></svg>
+        <span class="tool-label">Encuadre</span>
+      </button>
+      <div id="cam-list" class="menu" hidden></div>
+    </div>
+    <button id="cine" class="tool" aria-pressed="false" title="Modo cinematográfico">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5.5v13l11-6.5z"/></svg>
+      <span class="tool-label">Cine</span>
+    </button>
+    <div class="menu-wrap">
+      <button class="tool" data-menu="layers" aria-expanded="false" title="Capas técnicas">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l9 4.5-9 4.5-9-4.5z"/><path d="M3 12.5l9 4.5 9-4.5"/><path d="M3 16.5l9 4.5 9-4.5"/></svg>
+        <span class="tool-label">Capas</span>
+      </button>
+      <div id="layers" class="menu" hidden>
+        <label class="menu-item check"><input type="checkbox" data-toggle="malla" /> Malla</label>
+        <label class="menu-item check"><input type="checkbox" data-toggle="esqueleto" /> Esqueleto</label>
+        <label class="menu-item check"><input type="checkbox" data-toggle="bloom" checked /> Resplandor</label>
+      </div>
+    </div>
+    <button id="help" class="tool" title="Cómo interactuar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2-2.4 3.7"/><circle cx="12" cy="17.2" r="0.6"/></svg>
+      <span class="tool-label">Ayuda</span>
+    </button>
+  </aside>
+
+  <section id="hint" class="hint" hidden aria-label="Cómo interactuar">
+    <p class="eyebrow">Cómo interactuar</p>
+    <ul>
+      <li><b>Arrastra</b> sobre la cabeza, el cuello o el lomo para acariciarlo.</li>
+      <li><b>Toca</b> el hocico, la barbilla, los cuernos, las gorgueras, las alas, la cola o las patas.</li>
+      <li><b>Mueve</b> el cursor o el dedo cerca: Vesper lo sigue con la mirada.</li>
+      <li><b>Arrastra el fondo</b> para orbitar; rueda o pellizco para acercarte.</li>
+    </ul>
+    <button id="hint-close" class="text-btn">Entendido</button>
+  </section>
+
+  <section class="inspect" aria-label="Datos técnicos">
+    <dl>
+      <div><dt>Triángulos</dt><dd id="st-tris">—</dd></div>
+      <div><dt>Huesos</dt><dd id="st-bones">—</dd></div>
+      <div><dt>Morphs</dt><dd id="st-morphs">—</dd></div>
+      <div><dt>FPS</dt><dd id="st-fps">—</dd></div>
+      <div><dt>Calidad</dt><dd id="st-q">—</dd></div>
+    </dl>
+  </section>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
