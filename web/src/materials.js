@@ -115,7 +115,7 @@ export function makeSkin(tex) {
         }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         float flow = 0.80 + 0.20 * sin( vBUV.x * 70.0 - uTime * 1.6 );
-        totalEmissiveRadiance += uGlowColor * ( glowM * uGlow * flow * 9.0 + mouthM * uThroat * 1.6 );`);
+        totalEmissiveRadiance += uGlowColor * ( glowM * uGlow * flow * 9.0 + mouthM * uThroat * 0.25 );`);
   };
   return m;
 }
